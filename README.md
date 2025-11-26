@@ -63,11 +63,11 @@ sudo ./shieldops-cluster-bootstrap.sh --help
 ### Setup
 
 ```bash
-sudo chmod +x shieldops-cluster-bootstrap.sh --master
+sudo chmod +x shieldops-cluster-bootstrap.sh --master <DockerHUB Username>
 ```
 
 ### Permission
-# 1) Give yourself a user kubeconfig
+# 1) Give Current User kubeconfig
 ```bash
 sudo install -d -m 700 /home/"${USER}"/.kube
 sudo cp /etc/kubernetes/admin.conf /home/"${USER}"/.kube/config
@@ -85,7 +85,7 @@ unset KUBECONFIG
 kubectl get nodes
 kubectl get pods -A
 ```
-### Jenkins Permission
+### Jenkins Permissions
 
 ```bash
 sudo usermod -aG docker jenkins
@@ -107,7 +107,7 @@ docker login -u <username>
 sudo ./shieldops-cluster-bootstrap.sh --master --deploy
 ```
  
-### JWT_SECRET GENERATION (Change in values.yaml) (Optional)
+### JWT_SECRET GENERATION (Change in values.yaml & values-ci.yaml) (Optional)
 
 ```bash
 kubectl create secret generic shieldops-secrets \
@@ -121,7 +121,7 @@ kubectl create secret generic shieldops-secrets \
 sudo ./shieldops-cluster-bootstrap.sh --master --deploy
 ```
 
-**Access the Dashboard →** https://<your-server-ip> 🛡️
+**Access the Dashboard →** http://<Server-Ip>:<NodePort>  🛡️
 
 ---
 
@@ -246,7 +246,7 @@ vpa-updater-xxxxx                1/1   Running
 * Cert-Manager for automated TLS
 * Loki + Promtail centralized logging
 * Cosign for container image signing
-* Slack/email alert integrations
+* Slack alert integrations
 
 ---
 
