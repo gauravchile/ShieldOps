@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shieldops-backend
+  labels:
+    app: shieldops-backend
+spec:
+  replicas: {{ .Values.backend.replicaCount }}
+  selector:
+    matchLabels:
+      app: shieldops-backend
+  template:
+    metadata:
+      labels:
+        app: shieldops-backend
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: backend
+          image: "{{ .Values.global.imageRegistry }}/{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: Always
+          ports:
+            - containerPort: {{ .Values.backend.port }}
+          env:
+            - name: PORT
+              value: "{{ .Values.backend.env.PORT }}"
+            - name: TOKEN_EXPIRY
+              value: "{{ .Values.backend.env.TOKEN_EXPIRY }}"
+            - name: NODE_ENV
+              value: "{{ .Values.backend.env.NODE_ENV }}"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: shieldops-secrets
+                  key: jwtSecret
+
+          # 🩺 --- Health Probes ---
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: {{ .Values.backend.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+            successThreshold: 1
+
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: {{ .Values.backend.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+            successThreshold: 1
+          # ------------------------
+
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: shieldops-secrets
+type: Opaque
+stringData:
+  jwtSecret: "{{ .Values.backend.env.JWT_SECRET }}"

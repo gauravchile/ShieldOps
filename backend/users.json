@@ -1,0 +1,5 @@
+[
+  { "id": 1, "username": "admin",   "role": "admin",   "password": "shieldops" },
+  { "id": 2, "username": "analyst", "role": "analyst", "password": "shieldops" },
+  { "id": 3, "username": "viewer",  "role": "viewer",  "password": "shieldops" }
+]

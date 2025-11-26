@@ -1,0 +1,28 @@
+services:
+  backend:
+    build: ./backend
+    image: docker.io/${REGISTRY}/ShieldOps:backend
+    env_file:
+      - ./backend/.env
+    environment:
+      - PORT=8081
+      - TOKEN_EXPIRY=4h
+    depends_on:
+      - postgres
+    ports:
+      - "8081:8081"
+    networks: [shieldops]
+    restart: unless-stopped
+
+  ui:
+    image: docker.io/${REGISTRY}/ShieldOps:ui
+    depends_on: [backend]
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8081/api
+    ports:
+      - "80:80"
+    networks: [shieldops]
+    restart: unless-stopped
+
+networks:
+  shieldops: {}

@@ -1,0 +1,27 @@
+{{- if .Values.vpa.backend.enabled }}
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: {{ include "shieldops.apiFullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "shieldops.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: backend
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "shieldops.apiFullname" . }}
+  updatePolicy:
+    updateMode: {{ .Values.vpa.backend.updateMode | quote }}
+  resourcePolicy:
+    containerPolicies:
+      - containerName: "*"
+        minAllowed:
+          cpu: {{ .Values.vpa.backend.minAllowed.cpu | quote }}
+          memory: {{ .Values.vpa.backend.minAllowed.memory | quote }}
+        maxAllowed:
+          cpu: {{ .Values.vpa.backend.maxAllowed.cpu | quote }}
+          memory: {{ .Values.vpa.backend.maxAllowed.memory | quote }}
+{{- end }}
+

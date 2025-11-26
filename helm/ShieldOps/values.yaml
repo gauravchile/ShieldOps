@@ -1,0 +1,133 @@
+# ------------------------------------------------------------------------
+# 🛡️ ShieldOps Helm values.yaml
+# ------------------------------------------------------------------------
+
+global:
+  imageRegistry: docker.io
+  imagePullSecrets: []        # add secret if using private registry
+  pullPolicy: Always
+
+# ------------------------------------------------------------------------
+# 🧠 Backend
+# ------------------------------------------------------------------------
+backend:
+  image:
+    repository: ${REGISTRY}/shieldops
+    tag: backend
+    pullPolicy: Always
+  replicaCount: 2
+  port: 8081
+  serviceType: ClusterIP
+
+  env:
+    PORT: "8081"
+    TOKEN_EXPIRY: "4h"
+    JWT_SECRET: "change-me"   # ⚠️ move to Kubernetes Secret before prod
+    NODE_ENV: "production"
+
+  livenessProbe:
+    httpGet:
+      path: /api/health
+      port: 8081
+    initialDelaySeconds: 10
+    periodSeconds: 15
+
+  readinessProbe:
+    httpGet:
+      path: /api/health
+      port: 8081
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+# ------------------------------------------------------------------------
+# 🎨 UI
+# ------------------------------------------------------------------------
+ui:
+  image:
+    repository: ${REGISTRY}/shieldops
+    tag: ui
+    pullPolicy: Always
+  replicaCount: 2
+  port: 80
+  serviceType: ClusterIP
+
+  # ✅ NEW: runtime environment variable for frontend
+  env:
+    API_BASE_URL: "/api"
+
+  livenessProbe:
+    httpGet:
+      path: /
+      port: 80
+    initialDelaySeconds: 10
+    periodSeconds: 15
+
+  readinessProbe:
+    httpGet:
+      path: /
+      port: 80
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "300m"
+      memory: "256Mi"
+
+# ------------------------------------------------------------------------
+# 🌐 Ingress (NGINX)
+# ------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: nginx
+  hostname: shieldops.local
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+  tls:
+    enabled: false
+    secretName: shieldops-tls
+  paths:
+    - path: /
+      pathType: Prefix
+      service: ui
+      port: 80
+    - path: /api
+      pathType: Prefix
+      service: backend
+      port: 8081
+
+# ------------------------------------------------------------------------
+# 🤖 Vertical Pod Autoscaler
+# ------------------------------------------------------------------------
+vpa:
+  backend:
+    enabled: false
+    updateMode: "Auto"
+    minAllowed:
+      cpu: "100m"
+      memory: "128Mi"
+    maxAllowed:
+      cpu: "1000m"
+      memory: "1Gi"
+  ui:
+    enabled: false
+    updateMode: "Auto"
+    minAllowed:
+      cpu: "50m"
+      memory: "64Mi"
+    maxAllowed:
+      cpu: "500m"
+      memory: "512Mi"

@@ -1,0 +1,38 @@
+# ------------------------------------------------------------------------
+# 🌐 ShieldOps Ingress (EC2 / NGINX Ready, NodePort compatible)
+# ------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shieldops-ingress
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/proxy-body-size: "20m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: ""
+      http:
+        paths:
+          # ⚙️ Backend (Node.js API)
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: shieldops-backend
+                port:
+                  number: 8081
+
+          # 🎨 Frontend (React + Vite)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: shieldops-ui
+                port:
+                  number: 80
