@@ -4,45 +4,58 @@ pipeline {
   agent any
 
   environment {
-    REGISTRY        = "docker.io/${REGISTRY}/ShieldOps"
-    IMAGE_NAME      = "shieldops"
-    NAMESPACE       = "shieldops"
+    USER            = 'gauravchile'
+    REGISTRY        = 'docker.io'
+    IMAGE_NAME      = 'shieldops'
+    IMAGE_REPO      = "${REGISTRY}/${USER}/${IMAGE_NAME}"
+    NAMESPACE       = 'shieldops'
     SCAN_DIR        = "${WORKSPACE}/reports"
-    EMAIL_RECIPIENT = "email.example@gmail.com"
+    EMAIL_RECIPIENT = 'email.example@gmail.com'
+    ODC_CACHE_DIR   = '/tmp/odc-data'
     PATH            = "/usr/local/bin:/usr/bin:/bin:/home/ubuntu/.local/bin:${PATH}"
-    ODC_CACHE_DIR   = "/tmp/odc-data"
   }
 
+  options { timestamps() }
+
   stages {
-
-    stage('Clean Workspace') {
-      steps { cleanWs() }
-    }
-
+    /* -------------------------------------------------------------------------- */
     stage('Checkout Code') {
       steps {
         echo "🔄 Cloning ShieldOps repository..."
-        git branch: 'main', url: 'https://github.com/${REGISTRY}/ShieldOps.git'
+        checkout scm
       }
     }
 
+    /* -------------------------------------------------------------------------- */
+    stage('Determine Semantic Version') {
+      steps {
+        script {
+          def ver = getVersionTag(autoGitTag: true, gitCred: env.GIT_CRED ?: '')
+          env.IMAGE_TAG = ver.tag
+          echo "Resolved Version: ${env.IMAGE_TAG} (Mode: ${ver.mode})"
+          currentBuild.displayName = "#${BUILD_NUMBER} - ${env.IMAGE_TAG}"
+          currentBuild.description = "Version: ${env.IMAGE_TAG} | Security checks running"
+        }
+      }
+    }
+
+    /* -------------------------------------------------------------------------- */
     stage('Prepare Environment') {
       steps {
         sh '''
           set -e
           mkdir -p "${SCAN_DIR}" "${ODC_CACHE_DIR}"
-
           if [ ! -d "${WORKSPACE}/.venv" ]; then
             python3 -m venv "${WORKSPACE}/.venv"
           fi
           . "${WORKSPACE}/.venv/bin/activate"
           python -m pip install --upgrade pip
           pip install --quiet bandit safety
-          which codeql >/dev/null 2>&1 || echo "⚠️ CodeQL not installed; skipping."
         '''
       }
     }
 
+    /* -------------------------------------------------------------------------- */
     stage('Verify Tools') {
       steps {
         sh '''
@@ -59,6 +72,7 @@ pipeline {
       }
     }
 
+    /* -------------------------------------------------------------------------- */
     stage('Install Backend Dependencies') {
       steps {
         dir('backend') {
@@ -70,6 +84,7 @@ pipeline {
       }
     }
 
+    /* -------------------------------------------------------------------------- */
     stage('Build UI (Vite)') {
       steps {
         dir('ui') {
@@ -77,7 +92,6 @@ pipeline {
             echo "VITE_API_BASE_URL=/api" > .env
             npm install --no-audit --legacy-peer-deps
             if ! npx vite --version >/dev/null 2>&1; then
-              echo "vite not found — installing locally..."
               npm install vite --save-dev --no-audit --legacy-peer-deps
             fi
             npx vite build
@@ -86,12 +100,12 @@ pipeline {
       }
     }
 
+    /* -------------------------------------------------------------------------- */
     stage('SAST - ESLint, Bandit & CodeQL') {
       steps {
         script {
           dir('ui') {
             sh '''
-              if [ -f "../reports/eslint-report.json" ]; then rm -f ../reports/eslint-report.json; fi
               if [ ! -f ".eslintrc.json" ]; then
                 echo "⚠️ No ESLint config found, skipping UI lint."
               else
@@ -99,6 +113,7 @@ pipeline {
               fi
             '''
           }
+
           dir('backend') {
             sh '''
               . "${WORKSPACE}/.venv/bin/activate"
@@ -113,17 +128,18 @@ pipeline {
       }
     }
 
-    stage('SCA - Dependency-Check, Safety & CycloneDX') {
+    /* -------------------------------------------------------------------------- */
+    stage('SCA - Dependency Scans') {
       parallel {
         stage('Backend SCA') {
           steps {
             script {
               owasp_dependency_check(
-                scanPath : 'backend',
+                scanPath: 'backend',
                 reportDir: env.SCAN_DIR,
-                project  : 'ShieldOps-backend',
-                cacheDir : env.ODC_CACHE_DIR,
-                additionalArgs: '--exclude **/node_modules/** --exclude **/test/** --exclude **/dist/** --failOnCVSS 9'
+                project: 'ShieldOps-backend',
+                cacheDir: env.ODC_CACHE_DIR,
+                additionalArgs: '--exclude **/node_modules/** --failOnCVSS 9'
               )
               dir('backend') {
                 sh '''
@@ -141,11 +157,10 @@ pipeline {
           steps {
             script {
               owasp_dependency_check(
-                scanPath : 'ui',
+                scanPath: 'ui',
                 reportDir: env.SCAN_DIR,
-                project  : 'ShieldOps-ui',
-                cacheDir : env.ODC_CACHE_DIR,
-                additionalArgs: '--exclude **/node_modules/** --exclude **/dist/**'
+                project: 'ShieldOps-ui',
+                cacheDir: env.ODC_CACHE_DIR
               )
               dir('ui') {
                 sh 'npx -y @cyclonedx/bom -o ../reports/bom-frontend.json || true'
@@ -156,49 +171,50 @@ pipeline {
       }
     }
 
+    /* -------------------------------------------------------------------------- */
     stage('Build Docker Images') {
       steps {
         script {
-          docker_build("${env.REGISTRY}/${env.IMAGE_NAME}", "backend", "backend")
-          docker_build("${env.REGISTRY}/${env.IMAGE_NAME}", "ui", "ui")
+          echo "🏗️ Building Docker images..."
+          dir('backend') {
+            docker_build("${env.IMAGE_REPO}", "backend", env.IMAGE_TAG)
+          }
+          dir('ui') {
+            docker_build("${env.IMAGE_REPO}", "ui", env.IMAGE_TAG, "--build-arg BUILD_MODE=production")
+          }
         }
       }
     }
 
+    /* -------------------------------------------------------------------------- */
     stage('Image Scan - Trivy') {
       steps {
         sh "echo '🔎 Running Trivy image scan...'"
-        trivy_scan("${env.REGISTRY}/${env.IMAGE_NAME}:backend")
-        trivy_scan("${env.REGISTRY}/${env.IMAGE_NAME}:ui")
+        trivy_scan("${env.IMAGE_REPO}:backend-${env.IMAGE_TAG}")
+        trivy_scan("${env.IMAGE_REPO}:ui-${env.IMAGE_TAG}")
       }
     }
 
+    /* -------------------------------------------------------------------------- */
     stage('DAST - OWASP ZAP (Baseline)') {
       steps {
         owasp_zap_scan(
-          backendImage: "${env.REGISTRY}/${env.IMAGE_NAME}:backend",
-          scanDir     : env.SCAN_DIR,
-          targetUrl   : "http://127.0.0.1:8081/api/reports",
-          project     : "ShieldOps",
-          port        : "8081"
+          backendImage: "${env.IMAGE_REPO}:backend-${env.IMAGE_TAG}",
+          scanDir: env.SCAN_DIR,
+          targetUrl: "http://127.0.0.1:8081/api/reports",
+          project: "ShieldOps",
+          port: "8081"
         )
       }
     }
 
-    stage('Aggregate Reports') {
+    /* -------------------------------------------------------------------------- */
+    stage('Aggregate & Dashboard') {
       steps {
         sh '''
           echo "📊 Aggregating reports..."
           chmod +x aggregator/aggregate.sh || true
           bash aggregator/aggregate.sh "${SCAN_DIR}" || true
-        '''
-        generate_reports('reports')
-      }
-    }
-
-    stage('Generate HTML Dashboard') {
-      steps {
-        sh '''
           chmod +x aggregator/make_dashboard.sh || true
           bash aggregator/make_dashboard.sh "${SCAN_DIR}"
         '''
@@ -219,28 +235,30 @@ pipeline {
       }
     }
 
+    /* -------------------------------------------------------------------------- */
     stage('Push Docker Images') {
       steps {
         script {
-          docker_push(imageName: "${env.REGISTRY}/${env.IMAGE_NAME}", imageTag: "backend")
-          docker_push(imageName: "${env.REGISTRY}/${env.IMAGE_NAME}", imageTag: "ui")
+          docker_push("${env.IMAGE_REPO}", "backend-${env.IMAGE_TAG}")
+          docker_push("${env.IMAGE_REPO}", "ui-${env.IMAGE_TAG}")
         }
       }
     }
 
+    /* -------------------------------------------------------------------------- */
     stage('Deploy to Kubernetes (Helm)') {
       steps {
         script {
           try {
             helm_deploy(
-              chartDir   : './helm/ShieldOps',
+              chartDir: './helm/ShieldOps',
               releaseName: 'shieldops',
-              namespace  : env.NAMESPACE,
-              valuesFile : './helm/ShieldOps/values-ci.yaml',
-              imageRepo  : "${env.REGISTRY}/${env.IMAGE_NAME}",
-              imageTag   : "backend",
-              uiImageTag : "ui",
-              timeout    : '180s'
+              namespace: env.NAMESPACE,
+              valuesFile: './helm/ShieldOps/values-ci.yaml',
+              imageRepo: "${env.IMAGE_REPO}",
+              imageTag: "backend-${env.IMAGE_TAG}",
+              uiImageTag: "ui-${env.IMAGE_TAG}",
+              timeout: '180s'
             )
 
             sh '''
@@ -257,27 +275,39 @@ pipeline {
     }
   }
 
+  /* -------------------------------------------------------------------------- */
   post {
-    always {
-      archiveArtifacts artifacts: 'reports/**/*.{json,html,txt,sarif}', fingerprint: true
-    }
 
     success {
-      notify_email(
-        env.EMAIL_RECIPIENT,
-        '✅ ShieldOps Pipeline Success',
-        'All stages completed successfully — SAST, SCA, Trivy, ZAP, Dashboard, Helm deploy, and reports generated.'
-      )
+      def summary = """
+        <b>ShieldOps Pipeline Success</b><br>
+        Version: <b>${env.IMAGE_TAG}</b><br>
+        All stages completed successfully.<br><br>
+        Includes: SAST, SCA, Trivy, ZAP, Dashboard & Helm Deploy.
+      """
+      notify_email(env.EMAIL_RECIPIENT, "✅ ShieldOps Success • ${env.IMAGE_TAG}", summary)
+    }
+
+    unstable {
+      def summary = """
+        <b>ShieldOps Pipeline Warning</b><br>
+        Build marked <b>UNSTABLE</b> due to quality gate warnings or scan issues.
+      """
+      notify_email(env.EMAIL_RECIPIENT, "⚠️ ShieldOps Warning", summary)
     }
 
     failure {
-      notify_email(
-        env.EMAIL_RECIPIENT,
-        '❌ ShieldOps Pipeline Failed',
-        'One or more stages failed. Please check Jenkins logs for details.'
-      )
+      def summary = """
+        <b>ShieldOps Pipeline Failed</b><br>
+        One or more stages failed.<br>
+        Check Jenkins logs and dashboard for details.
+      """
+      notify_email(env.EMAIL_RECIPIENT, "❌ ShieldOps Failed • ${env.IMAGE_TAG}", summary)
     }
 
-    cleanup { cleanWs() }
+    always {
+      archiveArtifacts artifacts: 'reports/**/*.{json,html,txt,sarif}', fingerprint: true
+      cleanWs()
+    }
   }
 }
